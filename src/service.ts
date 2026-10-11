@@ -254,9 +254,13 @@ export interface CreatorSales {
   totals: CreatorTotals[];
 }
 
+function creatorExists(db: Db, creatorId: string): boolean {
+  return db.prepare('SELECT 1 FROM creators WHERE id = ?').get(creatorId) !== undefined;
+}
+
+// Devolve null para criador desconhecido e totais vazios para criador sem venda.
 export function getCreatorSales(db: Db, creatorId: string): CreatorSales | null {
-  const creator = db.prepare('SELECT id FROM creators WHERE id = ?').get(creatorId);
-  if (!creator) {
+  if (!creatorExists(db, creatorId)) {
     return null;
   }
 
