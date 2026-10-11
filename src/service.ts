@@ -93,8 +93,8 @@ function resolveRefund(db: Db, refund: RefundRow, order: OrderRow): void {
   const appliedCents = Math.min(refund.requested_cents, orderBalance(db, order.id));
   if (appliedCents > 0) {
     db.prepare(
-      "INSERT INTO ledger_entries (order_id, creator_id, kind, amount_cents, refund_id, created_at) VALUES (?, ?, 'refund', ?, ?, ?)",
-    ).run(order.id, order.creator_id, -appliedCents, refund.id, now());
+      "INSERT INTO ledger_entries (order_id, creator_id, kind, amount_cents, currency, refund_id, created_at) VALUES (?, ?, 'refund', ?, ?, ?, ?)",
+    ).run(order.id, order.creator_id, -appliedCents, order.currency, refund.id, now());
   }
   db.prepare(
     "UPDATE refunds SET status = 'applied', applied_cents = ?, resolved_at = ? WHERE id = ?",
@@ -109,8 +109,8 @@ function settleOrder(db: Db, order: OrderRow): void {
   }
   if (order.status === 'paid') {
     db.prepare(
-      "INSERT INTO ledger_entries (order_id, creator_id, kind, amount_cents, created_at) VALUES (?, ?, 'sale', ?, ?)",
-    ).run(order.id, order.creator_id, order.total_cents, now());
+      "INSERT INTO ledger_entries (order_id, creator_id, kind, amount_cents, currency, created_at) VALUES (?, ?, 'sale', ?, ?, ?)",
+    ).run(order.id, order.creator_id, order.total_cents, order.currency, now());
   }
 
   const waiting = db
@@ -268,15 +268,14 @@ export function getCreatorSales(db: Db, creatorId: string): CreatorSales | null 
   const rows = db
     .prepare(
       `SELECT
-         orders.currency AS currency,
-         COUNT(*) FILTER (WHERE entry.kind = 'sale') AS orders,
-         SUM(entry.amount_cents) FILTER (WHERE entry.kind = 'sale') AS sale_cents,
-         SUM(entry.amount_cents) AS net_cents
-       FROM ledger_entries AS entry
-       JOIN orders ON orders.id = entry.order_id
-       WHERE entry.creator_id = ?
-       GROUP BY orders.currency
-       ORDER BY orders.currency`,
+         currency,
+         COUNT(*) FILTER (WHERE kind = 'sale') AS orders,
+         SUM(amount_cents) FILTER (WHERE kind = 'sale') AS sale_cents,
+         SUM(amount_cents) AS net_cents
+       FROM ledger_entries
+       WHERE creator_id = ?
+       GROUP BY currency
+       ORDER BY currency`,
     )
     .all(creatorId) as Omit<CreatorTotals, 'refunded_cents'>[];
 

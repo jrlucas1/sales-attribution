@@ -5,6 +5,7 @@ export type Db = Database.Database;
 
 // ledger_entries é só de inserção: +total na venda, -valor aplicado em cada estorno.
 // O valor líquido de um pedido ou criador é sempre a soma dos lançamentos.
+// O lançamento copia a moeda do pedido. Como nenhum dos dois muda depois, a cópia não diverge.
 // A regra de atribuição não diferencia maiúsculas, então o banco também não pode
 // aceitar o mesmo cupom ou a mesma UTM para dois criadores mudando só a caixa.
 const SCHEMA = `
@@ -46,12 +47,16 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   creator_id   TEXT REFERENCES creators (id),
   kind         TEXT NOT NULL CHECK (kind IN ('sale', 'refund')),
   amount_cents INTEGER NOT NULL,
+  currency     TEXT NOT NULL,
   refund_id    TEXT UNIQUE REFERENCES refunds (id),
   created_at   TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS ledger_by_order ON ledger_entries (order_id);
-CREATE INDEX IF NOT EXISTS ledger_by_creator ON ledger_entries (creator_id);
+
+-- Cobre a query de totais do criador inteira: ela não precisa ler a tabela.
+CREATE INDEX IF NOT EXISTS ledger_totals_by_creator
+  ON ledger_entries (creator_id, currency, kind, amount_cents);
 
 -- Um pedido só pode ter um lançamento de venda.
 CREATE UNIQUE INDEX IF NOT EXISTS ledger_one_sale_per_order

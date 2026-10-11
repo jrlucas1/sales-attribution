@@ -8,11 +8,11 @@ let db: Db;
 
 const insertOrder = "INSERT INTO orders VALUES ('1', 10000, 'BRL', 'paid', NULL, 'none', 'agora')";
 const insertSale =
-  "INSERT INTO ledger_entries (order_id, kind, amount_cents, created_at) VALUES ('1', 'sale', 10000, 'agora')";
+  "INSERT INTO ledger_entries (order_id, kind, amount_cents, currency, created_at) VALUES ('1', 'sale', 10000, 'BRL', 'agora')";
 const insertRefund =
   "INSERT INTO refunds (id, order_id, requested_cents, currency, status, received_at) VALUES ('r1', '1', 3000, 'BRL', 'pending', 'agora')";
 const insertRefundEntry =
-  "INSERT INTO ledger_entries (order_id, kind, amount_cents, refund_id, created_at) VALUES ('1', 'refund', -3000, 'r1', 'agora')";
+  "INSERT INTO ledger_entries (order_id, kind, amount_cents, currency, refund_id, created_at) VALUES ('1', 'refund', -3000, 'BRL', 'r1', 'agora')";
 
 beforeEach(() => {
   db = openDatabase();
@@ -50,6 +50,18 @@ describe('restrições do banco', () => {
       .all('1') as { detail: string }[];
 
     expect(plan.map((step) => step.detail).join(' ')).toContain('USING INDEX ledger_by_order');
+  });
+
+  it('soma os totais de um criador só pelo índice, sem ler a tabela', () => {
+    const plan = db
+      .prepare(
+        'EXPLAIN QUERY PLAN SELECT currency, SUM(amount_cents) FROM ledger_entries WHERE creator_id = ? GROUP BY currency',
+      )
+      .all('ana') as { detail: string }[];
+
+    expect(plan.map((step) => step.detail)).toEqual([
+      'SEARCH ledger_entries USING COVERING INDEX ledger_totals_by_creator (creator_id=?)',
+    ]);
   });
 
   it('recusa dois lançamentos para o mesmo estorno', () => {
