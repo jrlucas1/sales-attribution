@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   created_at   TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS ledger_by_order ON ledger_entries (order_id);
 CREATE INDEX IF NOT EXISTS ledger_by_creator ON ledger_entries (creator_id);
 
 -- Um pedido só pode ter um lançamento de venda.

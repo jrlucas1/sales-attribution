@@ -34,6 +34,14 @@ describe('restrições do banco', () => {
     expect(() => db.exec(insertRefund)).toThrow(/UNIQUE/);
   });
 
+  it('busca os lançamentos de um pedido por índice, sem varrer a tabela', () => {
+    const plan = db
+      .prepare('EXPLAIN QUERY PLAN SELECT amount_cents FROM ledger_entries WHERE order_id = ?')
+      .all('1') as { detail: string }[];
+
+    expect(plan.map((step) => step.detail).join(' ')).toContain('USING INDEX ledger_by_order');
+  });
+
   it('recusa dois lançamentos para o mesmo estorno', () => {
     db.exec(insertRefund);
     db.exec(insertRefundEntry);
