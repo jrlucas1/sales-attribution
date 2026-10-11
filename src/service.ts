@@ -260,21 +260,23 @@ export function getCreatorSales(db: Db, creatorId: string): CreatorSales | null 
     return null;
   }
 
-  const totals = db
+  // Cada pedido tem um único lançamento de venda, então contar vendas é contar pedidos.
+  const rows = db
     .prepare(
       `SELECT
          orders.currency AS currency,
-         COUNT(DISTINCT ledger_entries.order_id) AS orders,
-         SUM(CASE WHEN ledger_entries.kind = 'sale' THEN ledger_entries.amount_cents ELSE 0 END) AS sale_cents,
-         SUM(CASE WHEN ledger_entries.kind = 'refund' THEN -ledger_entries.amount_cents ELSE 0 END) AS refunded_cents,
-         SUM(ledger_entries.amount_cents) AS net_cents
-       FROM ledger_entries
-       JOIN orders ON orders.id = ledger_entries.order_id
-       WHERE ledger_entries.creator_id = ?
+         COUNT(*) FILTER (WHERE entry.kind = 'sale') AS orders,
+         SUM(entry.amount_cents) FILTER (WHERE entry.kind = 'sale') AS sale_cents,
+         SUM(entry.amount_cents) AS net_cents
+       FROM ledger_entries AS entry
+       JOIN orders ON orders.id = entry.order_id
+       WHERE entry.creator_id = ?
        GROUP BY orders.currency
        ORDER BY orders.currency`,
     )
-    .all(creatorId) as CreatorTotals[];
+    .all(creatorId) as Omit<CreatorTotals, 'refunded_cents'>[];
+
+  const totals = rows.map((row) => ({ ...row, refunded_cents: row.sale_cents - row.net_cents }));
 
   return { creator_id: creatorId, totals };
 }

@@ -211,6 +211,41 @@ describe('leitura', () => {
     });
   });
 
+  it('GET /creators/:id/sales separa por moeda e desconta os estornos', async () => {
+    await post(ctx.app, '/webhooks/orders', orderPayload({ id: 1, total_price: '100.00' }));
+    await post(ctx.app, '/webhooks/orders', orderPayload({ id: 2, total_price: '40.00' }));
+    await post(
+      ctx.app,
+      '/webhooks/orders',
+      orderPayload({ id: 3, total_price: '20.00', currency: 'USD' }),
+    );
+    await post(ctx.app, '/webhooks/refunds', {
+      id: 'r1',
+      order_id: 1,
+      amount: '30.00',
+      currency: 'BRL',
+    });
+    await post(ctx.app, '/webhooks/refunds', {
+      id: 'r2',
+      order_id: 1,
+      amount: '5.00',
+      currency: 'BRL',
+    });
+
+    const { body } = await get(ctx.app, '/creators/ana/sales');
+
+    expect(body.totals).toEqual([
+      { currency: 'BRL', orders: 2, sale_cents: 14000, refunded_cents: 3500, net_cents: 10500 },
+      { currency: 'USD', orders: 1, sale_cents: 2000, refunded_cents: 0, net_cents: 2000 },
+    ]);
+  });
+
+  it('GET /creators/:id/sales devolve lista vazia para criador sem venda', async () => {
+    const { body } = await get(ctx.app, '/creators/bruno/sales');
+
+    expect(body).toEqual({ creator_id: 'bruno', totals: [] });
+  });
+
   it('responde 404 para criador ou pedido desconhecido', async () => {
     expect((await get(ctx.app, '/creators/carla/sales')).status).toBe(404);
     expect((await get(ctx.app, '/orders/9999')).status).toBe(404);
