@@ -5,11 +5,13 @@ export type Db = Database.Database;
 
 // ledger_entries é só de inserção: +total na venda, -valor aplicado em cada estorno.
 // O valor líquido de um pedido ou criador é sempre a soma dos lançamentos.
+// A regra de atribuição não diferencia maiúsculas, então o banco também não pode
+// aceitar o mesmo cupom ou a mesma UTM para dois criadores mudando só a caixa.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS creators (
   id          TEXT PRIMARY KEY,
-  coupon_code TEXT NOT NULL UNIQUE,
-  utm_content TEXT NOT NULL UNIQUE
+  coupon_code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  utm_content TEXT NOT NULL UNIQUE COLLATE NOCASE
 );
 
 CREATE TABLE IF NOT EXISTS orders (

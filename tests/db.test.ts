@@ -34,6 +34,16 @@ describe('restrições do banco', () => {
     expect(() => db.exec(insertRefund)).toThrow(/UNIQUE/);
   });
 
+  it('recusa cupom ou UTM de outro criador que só muda maiúsculas', () => {
+    db.exec("INSERT INTO creators VALUES ('ana', 'ANA10', 'ana')");
+    expect(() => db.exec("INSERT INTO creators VALUES ('outra', 'ana10', 'outra')")).toThrow(
+      /UNIQUE/,
+    );
+    expect(() => db.exec("INSERT INTO creators VALUES ('outra', 'OUTRA10', 'Ana')")).toThrow(
+      /UNIQUE/,
+    );
+  });
+
   it('busca os lançamentos de um pedido por índice, sem varrer a tabela', () => {
     const plan = db
       .prepare('EXPLAIN QUERY PLAN SELECT amount_cents FROM ledger_entries WHERE order_id = ?')
