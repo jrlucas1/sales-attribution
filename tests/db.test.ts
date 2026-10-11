@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { openDatabase } from '../src/db.ts';
+import { openDatabase, prepared } from '../src/db.ts';
 import type { Db } from '../src/db.ts';
 
 // Segunda linha de defesa: mesmo que o código de ingestão erre,
@@ -62,6 +62,16 @@ describe('restrições do banco', () => {
     expect(plan.map((step) => step.detail)).toEqual([
       'SEARCH ledger_entries USING COVERING INDEX ledger_totals_by_creator (creator_id=?)',
     ]);
+  });
+
+  it('prepara cada SQL uma vez por conexão', () => {
+    const other = openDatabase();
+    const sql = 'SELECT id FROM orders WHERE id = ?';
+
+    expect(prepared(db, sql)).toBe(prepared(db, sql));
+    expect(prepared(db, sql)).not.toBe(prepared(db, 'SELECT 1'));
+    expect(prepared(db, sql)).not.toBe(prepared(other, sql));
+    expect(prepared(db, sql).get('1')).toEqual({ id: '1' });
   });
 
   it('recusa dois lançamentos para o mesmo estorno', () => {

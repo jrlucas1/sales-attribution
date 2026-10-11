@@ -1,5 +1,6 @@
 import { attribute } from './attribution.ts';
 import type { AttributionInput, AttributionReason, Creator } from './attribution.ts';
+import { prepared } from './db.ts';
 import type { Db } from './db.ts';
 
 export type OrderStatus = 'pending' | 'paid' | 'cancelled';
@@ -56,24 +57,27 @@ function now(): string {
 }
 
 function listCreators(db: Db): Creator[] {
-  return db
-    .prepare('SELECT id, coupon_code AS couponCode, utm_content AS utmContent FROM creators')
-    .all() as Creator[];
+  return prepared(
+    db,
+    'SELECT id, coupon_code AS couponCode, utm_content AS utmContent FROM creators',
+  ).all() as Creator[];
 }
 
 function findOrder(db: Db, orderId: string): OrderRow | undefined {
-  return db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) as OrderRow | undefined;
+  return prepared(db, 'SELECT * FROM orders WHERE id = ?').get(orderId) as OrderRow | undefined;
 }
 
 function orderBalance(db: Db, orderId: string): number {
-  const row = db
-    .prepare('SELECT COALESCE(SUM(amount_cents), 0) AS balance FROM ledger_entries WHERE order_id = ?')
-    .get(orderId) as { balance: number };
+  const row = prepared(
+    db,
+    'SELECT COALESCE(SUM(amount_cents), 0) AS balance FROM ledger_entries WHERE order_id = ?',
+  ).get(orderId) as { balance: number };
   return row.balance;
 }
 
 function discardRefund(db: Db, refundId: string, reason: string): void {
-  db.prepare(
+  prepared(
+    db,
     "UPDATE refunds SET status = 'discarded', applied_cents = 0, discard_reason = ?, resolved_at = ? WHERE id = ?",
   ).run(reason, now(), refundId);
 }
@@ -92,11 +96,13 @@ function resolveRefund(db: Db, refund: RefundRow, order: OrderRow): void {
 
   const appliedCents = Math.min(refund.requested_cents, orderBalance(db, order.id));
   if (appliedCents > 0) {
-    db.prepare(
+    prepared(
+      db,
       "INSERT INTO ledger_entries (order_id, creator_id, kind, amount_cents, currency, refund_id, created_at) VALUES (?, ?, 'refund', ?, ?, ?, ?)",
     ).run(order.id, order.creator_id, -appliedCents, order.currency, refund.id, now());
   }
-  db.prepare(
+  prepared(
+    db,
     "UPDATE refunds SET status = 'applied', applied_cents = ?, resolved_at = ? WHERE id = ?",
   ).run(appliedCents, now(), refund.id);
 }
@@ -108,14 +114,16 @@ function settleOrder(db: Db, order: OrderRow): void {
     return;
   }
   if (order.status === 'paid') {
-    db.prepare(
+    prepared(
+      db,
       "INSERT INTO ledger_entries (order_id, creator_id, kind, amount_cents, currency, created_at) VALUES (?, ?, 'sale', ?, ?, ?)",
     ).run(order.id, order.creator_id, order.total_cents, order.currency, now());
   }
 
-  const waiting = db
-    .prepare("SELECT * FROM refunds WHERE order_id = ? AND status = 'pending' ORDER BY seq")
-    .all(order.id) as RefundRow[];
+  const waiting = prepared(
+    db,
+    "SELECT * FROM refunds WHERE order_id = ? AND status = 'pending' ORDER BY seq",
+  ).all(order.id) as RefundRow[];
   for (const refund of waiting) {
     resolveRefund(db, refund, order);
   }
@@ -136,7 +144,8 @@ export function ingestOrder(db: Db, input: OrderInput): OrderOutcome {
         attribution_reason: reason,
         received_at: now(),
       };
-      db.prepare(
+      prepared(
+        db,
         'INSERT INTO orders (id, total_cents, currency, status, creator_id, attribution_reason, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       ).run(
         order.id,
@@ -156,7 +165,7 @@ export function ingestOrder(db: Db, input: OrderInput): OrderOutcome {
     if (existing.status !== 'pending' || input.status === 'pending') {
       return 'duplicate';
     }
-    db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(input.status, existing.id);
+    prepared(db, 'UPDATE orders SET status = ? WHERE id = ?').run(input.status, existing.id);
     settleOrder(db, { ...existing, status: input.status });
     return 'updated';
   });
@@ -165,11 +174,10 @@ export function ingestOrder(db: Db, input: OrderInput): OrderOutcome {
 
 export function ingestRefund(db: Db, input: RefundInput): RefundOutcome {
   const run = db.transaction((): RefundOutcome => {
-    const inserted = db
-      .prepare(
-        "INSERT INTO refunds (id, order_id, requested_cents, currency, status, received_at) VALUES (?, ?, ?, ?, 'pending', ?) ON CONFLICT (id) DO NOTHING",
-      )
-      .run(input.id, input.orderId, input.amountCents, input.currency, now());
+    const inserted = prepared(
+      db,
+      "INSERT INTO refunds (id, order_id, requested_cents, currency, status, received_at) VALUES (?, ?, ?, ?, 'pending', ?) ON CONFLICT (id) DO NOTHING",
+    ).run(input.id, input.orderId, input.amountCents, input.currency, now());
     if (inserted.changes === 0) {
       return 'duplicate';
     }
@@ -179,9 +187,9 @@ export function ingestRefund(db: Db, input: RefundInput): RefundOutcome {
       return 'pending';
     }
 
-    const refund = db.prepare('SELECT * FROM refunds WHERE id = ?').get(input.id) as RefundRow;
+    const refund = prepared(db, 'SELECT * FROM refunds WHERE id = ?').get(input.id) as RefundRow;
     resolveRefund(db, refund, order);
-    const resolved = db.prepare('SELECT status FROM refunds WHERE id = ?').get(input.id) as {
+    const resolved = prepared(db, 'SELECT status FROM refunds WHERE id = ?').get(input.id) as {
       status: RefundStatus;
     };
     return resolved.status;
@@ -190,11 +198,10 @@ export function ingestRefund(db: Db, input: RefundInput): RefundOutcome {
 }
 
 function listRefunds(db: Db, orderId: string): RefundRow[] {
-  return db
-    .prepare(
-      'SELECT id, order_id, requested_cents, currency, status, applied_cents, discard_reason, received_at, resolved_at FROM refunds WHERE order_id = ? ORDER BY seq',
-    )
-    .all(orderId) as RefundRow[];
+  return prepared(
+    db,
+    'SELECT id, order_id, requested_cents, currency, status, applied_cents, discard_reason, received_at, resolved_at FROM refunds WHERE order_id = ? ORDER BY seq',
+  ).all(orderId) as RefundRow[];
 }
 
 export interface OrderView {
@@ -215,11 +222,10 @@ export function getOrderView(db: Db, orderId: string): OrderView | null {
     return null;
   }
 
-  const ledger = db
-    .prepare(
-      'SELECT kind, amount_cents, refund_id, created_at FROM ledger_entries WHERE order_id = ? ORDER BY id',
-    )
-    .all(orderId) as LedgerRow[];
+  const ledger = prepared(
+    db,
+    'SELECT kind, amount_cents, refund_id, created_at FROM ledger_entries WHERE order_id = ? ORDER BY id',
+  ).all(orderId) as LedgerRow[];
 
   let saleCents = 0;
   let refundedCents = 0;
@@ -255,7 +261,7 @@ export interface CreatorSales {
 }
 
 function creatorExists(db: Db, creatorId: string): boolean {
-  return db.prepare('SELECT 1 FROM creators WHERE id = ?').get(creatorId) !== undefined;
+  return prepared(db, 'SELECT 1 FROM creators WHERE id = ?').get(creatorId) !== undefined;
 }
 
 // Devolve null para criador desconhecido e totais vazios para criador sem venda.
@@ -265,19 +271,18 @@ export function getCreatorSales(db: Db, creatorId: string): CreatorSales | null 
   }
 
   // Cada pedido tem um único lançamento de venda, então contar vendas é contar pedidos.
-  const rows = db
-    .prepare(
-      `SELECT
-         currency,
-         COUNT(*) FILTER (WHERE kind = 'sale') AS orders,
-         SUM(amount_cents) FILTER (WHERE kind = 'sale') AS sale_cents,
-         SUM(amount_cents) AS net_cents
-       FROM ledger_entries
-       WHERE creator_id = ?
-       GROUP BY currency
-       ORDER BY currency`,
-    )
-    .all(creatorId) as Omit<CreatorTotals, 'refunded_cents'>[];
+  const rows = prepared(
+    db,
+    `SELECT
+       currency,
+       COUNT(*) FILTER (WHERE kind = 'sale') AS orders,
+       SUM(amount_cents) FILTER (WHERE kind = 'sale') AS sale_cents,
+       SUM(amount_cents) AS net_cents
+     FROM ledger_entries
+     WHERE creator_id = ?
+     GROUP BY currency
+     ORDER BY currency`,
+  ).all(creatorId) as Omit<CreatorTotals, 'refunded_cents'>[];
 
   const totals = rows.map((row) => ({ ...row, refunded_cents: row.sale_cents - row.net_cents }));
 
