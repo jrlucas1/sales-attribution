@@ -11,6 +11,7 @@ npm install
 npm run dev        # http://127.0.0.1:3000, banco em sales.db
 npm test
 npm run typecheck
+npm run bench      # carga e estresse contra o servidor real
 ```
 
 `PORT` e `DATABASE_PATH` mudam a porta e o arquivo do banco. O banco começa com dois criadores: `ana` (cupom `ANA10`) e `bruno` (cupom `BRUNO10`).
