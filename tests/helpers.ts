@@ -39,9 +39,17 @@ export function refundPayload(overrides: Record<string, unknown> = {}): Record<s
   };
 }
 
-export async function post(app: FastifyInstance, url: string, payload: unknown) {
-  const response = await app.inject({ method: 'POST', url, payload: payload as object });
-  return { status: response.statusCode, body: response.json() };
+// Envia um webhook. `view` é o pedido lido por GET /orders/:id logo depois,
+// ou null quando o payload não tem id de pedido ou nada foi gravado.
+export async function post(app: FastifyInstance, url: string, payload: Record<string, unknown>) {
+  const response = await app.inject({ method: 'POST', url, payload });
+  const orderId = payload.order_id ?? payload.id;
+  const order = orderId === undefined ? null : await get(app, `/orders/${orderId}`);
+  return {
+    status: response.statusCode,
+    body: response.json(),
+    view: order?.status === 200 ? order.body : null,
+  };
 }
 
 export async function get(app: FastifyInstance, url: string) {

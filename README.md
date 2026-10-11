@@ -40,7 +40,7 @@ npm run bench      # carga e estresse contra o servidor real
 { "id": "r1", "order_id": 5001, "amount": "25.00", "currency": "BRL" }
 ```
 
-Os webhooks respondem 200 com `outcome` e o estado do pedido. Um payload inválido recebe 422.
+Os webhooks respondem 200 com `outcome`. Use `GET /orders/:id` para ler o estado do pedido. Um payload inválido recebe 422.
 
 ## Regra de atribuição
 

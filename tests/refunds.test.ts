@@ -11,7 +11,7 @@ beforeEach(() => {
 describe('estorno de pedido já pago', () => {
   it('estorno total zera a atribuição sem apagar a venda do histórico', async () => {
     await post(ctx.app, '/webhooks/orders', orderPayload());
-    const { status, body } = await post(
+    const { status, body, view } = await post(
       ctx.app,
       '/webhooks/refunds',
       refundPayload({ amount: '100.00' }),
@@ -19,21 +19,21 @@ describe('estorno de pedido já pago', () => {
 
     expect(status).toBe(200);
     expect(body.outcome).toBe('applied');
-    expect(body.net_cents).toBe(0);
-    expect(body.ledger).toMatchObject([
+    expect(view.net_cents).toBe(0);
+    expect(view.ledger).toMatchObject([
       { kind: 'sale', amount_cents: 10000, refund_id: null },
       { kind: 'refund', amount_cents: -10000, refund_id: 'r1' },
     ]);
-    expect(body.order.creator_id).toBe('ana');
+    expect(view.order.creator_id).toBe('ana');
     expect(await netOf(ctx.app, 'ana')).toBe(0);
   });
 
   it('estorno parcial reverte só o valor estornado', async () => {
     await post(ctx.app, '/webhooks/orders', orderPayload());
-    const { body } = await post(ctx.app, '/webhooks/refunds', refundPayload({ amount: '30.00' }));
+    const { view } = await post(ctx.app, '/webhooks/refunds', refundPayload({ amount: '30.00' }));
 
-    expect(body).toMatchObject({ sale_cents: 10000, refunded_cents: 3000, net_cents: 7000 });
-    expect(body.refunds).toMatchObject([
+    expect(view).toMatchObject({ sale_cents: 10000, refunded_cents: 3000, net_cents: 7000 });
+    expect(view.refunds).toMatchObject([
       { id: 'r1', status: 'applied', requested_cents: 3000, applied_cents: 3000 },
     ]);
     expect(await netOf(ctx.app, 'ana')).toBe(7000);
@@ -55,8 +55,8 @@ describe('estorno de pedido já pago', () => {
 
     expect(second.body.outcome).toBe('duplicate');
     expect(third.body.outcome).toBe('duplicate');
-    expect(third.body.refunds).toHaveLength(1);
-    expect(third.body.refunded_cents).toBe(3000);
+    expect(third.view.refunds).toHaveLength(1);
+    expect(third.view.refunded_cents).toBe(3000);
     expect(await netOf(ctx.app, 'ana')).toBe(7000);
   });
 
@@ -87,14 +87,14 @@ describe('estorno de pedido já pago', () => {
     );
 
     expect(over.body.outcome).toBe('applied');
-    expect(afterZero.body).toMatchObject({ refunded_cents: 10000, net_cents: 0 });
-    expect(afterZero.body.refunds).toMatchObject([
+    expect(afterZero.view).toMatchObject({ refunded_cents: 10000, net_cents: 0 });
+    expect(afterZero.view.refunds).toMatchObject([
       { id: 'r1', requested_cents: 7000, applied_cents: 7000 },
       { id: 'r2', requested_cents: 5000, applied_cents: 3000 },
       { id: 'r3', requested_cents: 1000, applied_cents: 0, status: 'applied' },
     ]);
     // Estorno que não aplicou nada não gera lançamento.
-    expect(afterZero.body.ledger).toHaveLength(3);
+    expect(afterZero.view.ledger).toHaveLength(3);
     expect(await netOf(ctx.app, 'ana')).toBe(0);
   });
 
@@ -107,25 +107,25 @@ describe('estorno de pedido já pago', () => {
       refundPayload({ id: 'r2', amount: '0.01' }),
     );
 
-    expect(last.body.refunds[1]).toMatchObject({ requested_cents: 1, applied_cents: 1 });
-    expect(last.body.net_cents).toBe(0);
+    expect(last.view.refunds[1]).toMatchObject({ requested_cents: 1, applied_cents: 1 });
+    expect(last.view.net_cents).toBe(0);
   });
 
   it('estorno de pedido sem criador reverte o pedido e não afeta nenhum criador', async () => {
     await post(ctx.app, '/webhooks/orders', orderPayload({ discount_codes: [] }));
-    const { body } = await post(ctx.app, '/webhooks/refunds', refundPayload());
+    const { view } = await post(ctx.app, '/webhooks/refunds', refundPayload());
 
-    expect(body.net_cents).toBe(7000);
+    expect(view.net_cents).toBe(7000);
     expect(await netOf(ctx.app, 'ana')).toBe(0);
     expect(await netOf(ctx.app, 'bruno')).toBe(0);
   });
 
   it('estorno em moeda diferente da do pedido é registrado e descartado', async () => {
     await post(ctx.app, '/webhooks/orders', orderPayload());
-    const { body } = await post(ctx.app, '/webhooks/refunds', refundPayload({ currency: 'USD' }));
+    const { body, view } = await post(ctx.app, '/webhooks/refunds', refundPayload({ currency: 'USD' }));
 
     expect(body.outcome).toBe('discarded');
-    expect(body.refunds).toMatchObject([
+    expect(view.refunds).toMatchObject([
       { status: 'discarded', applied_cents: 0, discard_reason: 'currency_mismatch' },
     ]);
     expect(await netOf(ctx.app, 'ana')).toBe(10000);
@@ -160,16 +160,16 @@ describe('estorno que chega antes do pedido', () => {
 
     expect(early.status).toBe(200);
     expect(early.body.outcome).toBe('pending');
-    expect(early.body.order).toBeNull();
-    expect(early.body.refunds).toMatchObject([
+    expect(early.view.order).toBeNull();
+    expect(early.view.refunds).toMatchObject([
       { id: 'r1', status: 'pending', applied_cents: null },
     ]);
 
     const order = await post(ctx.app, '/webhooks/orders', orderPayload());
 
     expect(order.body.outcome).toBe('created');
-    expect(order.body).toMatchObject({ sale_cents: 10000, refunded_cents: 3000, net_cents: 7000 });
-    expect(order.body.refunds).toMatchObject([
+    expect(order.view).toMatchObject({ sale_cents: 10000, refunded_cents: 3000, net_cents: 7000 });
+    expect(order.view.refunds).toMatchObject([
       { id: 'r1', status: 'applied', applied_cents: 3000 },
     ]);
     expect(await netOf(ctx.app, 'ana')).toBe(7000);
@@ -199,14 +199,14 @@ describe('estorno que chega antes do pedido', () => {
     await post(ctx.app, '/webhooks/refunds', refundPayload({ id: 'r1', amount: '80.00' }));
     await post(ctx.app, '/webhooks/refunds', refundPayload({ id: 'r2', amount: '50.00' }));
     await post(ctx.app, '/webhooks/refunds', refundPayload({ id: 'r3', amount: '10.00' }));
-    const { body } = await post(ctx.app, '/webhooks/orders', orderPayload());
+    const { view } = await post(ctx.app, '/webhooks/orders', orderPayload());
 
-    expect(body.refunds).toMatchObject([
+    expect(view.refunds).toMatchObject([
       { id: 'r1', applied_cents: 8000 },
       { id: 'r2', applied_cents: 2000 },
       { id: 'r3', applied_cents: 0 },
     ]);
-    expect(body.net_cents).toBe(0);
+    expect(view.net_cents).toBe(0);
     expect(await netOf(ctx.app, 'ana')).toBe(0);
   });
 
@@ -228,7 +228,7 @@ describe('estorno que chega antes do pedido', () => {
     );
 
     expect(duringPending.body.outcome).toBe('pending');
-    expect(duringPending.body.refunds).toMatchObject([
+    expect(duringPending.view.refunds).toMatchObject([
       { id: 'r1', status: 'pending' },
       { id: 'r2', status: 'pending' },
     ]);
@@ -236,7 +236,7 @@ describe('estorno que chega antes do pedido', () => {
 
     const paid = await post(ctx.app, '/webhooks/orders', orderPayload({ status: 'paid' }));
 
-    expect(paid.body.net_cents).toBe(5000);
+    expect(paid.view.net_cents).toBe(5000);
     expect(await netOf(ctx.app, 'ana')).toBe(5000);
   });
 
@@ -250,29 +250,29 @@ describe('estorno que chega antes do pedido', () => {
     );
     const late = await post(ctx.app, '/webhooks/refunds', refundPayload({ id: 'r2' }));
 
-    expect(cancelled.body.refunds).toMatchObject([
+    expect(cancelled.view.refunds).toMatchObject([
       { id: 'r1', status: 'discarded', applied_cents: 0, discard_reason: 'order_cancelled' },
     ]);
     expect(late.body.outcome).toBe('discarded');
-    expect(late.body.ledger).toHaveLength(0);
+    expect(late.view.ledger).toHaveLength(0);
     expect(await netOf(ctx.app, 'ana')).toBe(0);
   });
 
   it('em moeda diferente da do pedido é descartado quando o pedido chega', async () => {
     await post(ctx.app, '/webhooks/refunds', refundPayload({ currency: 'USD' }));
-    const { body } = await post(ctx.app, '/webhooks/orders', orderPayload());
+    const { view } = await post(ctx.app, '/webhooks/orders', orderPayload());
 
-    expect(body.refunds).toMatchObject([
+    expect(view.refunds).toMatchObject([
       { status: 'discarded', discard_reason: 'currency_mismatch' },
     ]);
-    expect(body.net_cents).toBe(10000);
+    expect(view.net_cents).toBe(10000);
   });
 
   it('não afeta outro pedido', async () => {
     await post(ctx.app, '/webhooks/refunds', refundPayload({ order_id: 2002 }));
-    const { body } = await post(ctx.app, '/webhooks/orders', orderPayload({ id: 1001 }));
+    const { view } = await post(ctx.app, '/webhooks/orders', orderPayload({ id: 1001 }));
 
-    expect(body.refunds).toHaveLength(0);
-    expect(body.net_cents).toBe(10000);
+    expect(view.refunds).toHaveLength(0);
+    expect(view.net_cents).toBe(10000);
   });
 });

@@ -66,7 +66,7 @@ export function buildApp(db: Db): FastifyInstance {
       couponCodes: payload.discount_codes.map((discount) => discount.code),
       ...readUtm(payload.landing_site),
     });
-    return reply.send({ outcome, ...getOrderView(db, payload.id) });
+    return reply.send({ outcome });
   });
 
   app.post('/webhooks/refunds', (request, reply) => {
@@ -81,7 +81,7 @@ export function buildApp(db: Db): FastifyInstance {
       amountCents: payload.amount,
       currency: payload.currency,
     });
-    return reply.send({ outcome, ...getOrderView(db, payload.order_id) });
+    return reply.send({ outcome });
   });
 
   app.get<{ Params: { id: string } }>('/orders/:id', (request, reply) => {

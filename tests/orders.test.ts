@@ -10,11 +10,11 @@ beforeEach(() => {
 
 describe('webhook de pedido', () => {
   it('grava a venda e atribui ao criador do cupom', async () => {
-    const { status, body } = await post(ctx.app, '/webhooks/orders', orderPayload());
+    const { status, body, view } = await post(ctx.app, '/webhooks/orders', orderPayload());
 
     expect(status).toBe(200);
     expect(body.outcome).toBe('created');
-    expect(body.order).toMatchObject({
+    expect(view.order).toMatchObject({
       id: '1001',
       total_cents: 10000,
       status: 'paid',
@@ -24,8 +24,22 @@ describe('webhook de pedido', () => {
     expect(await netOf(ctx.app, 'ana')).toBe(10000);
   });
 
+  it('o webhook responde só o outcome; o estado do pedido fica em GET /orders/:id', async () => {
+    const order = await post(ctx.app, '/webhooks/orders', orderPayload());
+    const refund = await post(ctx.app, '/webhooks/refunds', {
+      id: 'r1',
+      order_id: 1001,
+      amount: '30.00',
+      currency: 'BRL',
+    });
+
+    expect(order.body).toEqual({ outcome: 'created' });
+    expect(refund.body).toEqual({ outcome: 'applied' });
+    expect((await get(ctx.app, '/orders/1001')).body.net_cents).toBe(7000);
+  });
+
   it('lê as UTMs da query string de landing_site', async () => {
-    const { body } = await post(
+    const { view } = await post(
       ctx.app,
       '/webhooks/orders',
       orderPayload({
@@ -34,30 +48,30 @@ describe('webhook de pedido', () => {
       }),
     );
 
-    expect(body.order).toMatchObject({ creator_id: 'bruno', attribution_reason: 'utm' });
+    expect(view.order).toMatchObject({ creator_id: 'bruno', attribution_reason: 'utm' });
   });
 
   it('cupom vence a UTM de outro criador', async () => {
-    const { body } = await post(
+    const { view } = await post(
       ctx.app,
       '/webhooks/orders',
       orderPayload({ landing_site: '/?utm_source=conty&utm_content=bruno' }),
     );
 
-    expect(body.order.creator_id).toBe('ana');
+    expect(view.order.creator_id).toBe('ana');
     expect(await netOf(ctx.app, 'ana')).toBe(10000);
     expect(await netOf(ctx.app, 'bruno')).toBe(0);
   });
 
   it('grava pedido sem criador com atribuição nula', async () => {
-    const { body } = await post(
+    const { view } = await post(
       ctx.app,
       '/webhooks/orders',
       orderPayload({ discount_codes: [], landing_site: null }),
     );
 
-    expect(body.order).toMatchObject({ creator_id: null, attribution_reason: 'none' });
-    expect(body.net_cents).toBe(10000);
+    expect(view.order).toMatchObject({ creator_id: null, attribution_reason: 'none' });
+    expect(view.net_cents).toBe(10000);
   });
 
   it('pedido repetido não soma a venda de novo', async () => {
@@ -66,7 +80,7 @@ describe('webhook de pedido', () => {
 
     expect(second.status).toBe(200);
     expect(second.body.outcome).toBe('duplicate');
-    expect(second.body.ledger).toHaveLength(1);
+    expect(second.view.ledger).toHaveLength(1);
     expect(await netOf(ctx.app, 'ana')).toBe(10000);
   });
 
@@ -87,7 +101,7 @@ describe('webhook de pedido', () => {
     );
 
     expect(second.body.outcome).toBe('duplicate');
-    expect(second.body.order).toMatchObject({ creator_id: 'ana', total_cents: 10000 });
+    expect(second.view.order).toMatchObject({ creator_id: 'ana', total_cents: 10000 });
     expect(await netOf(ctx.app, 'ana')).toBe(10000);
     expect(await netOf(ctx.app, 'bruno')).toBe(0);
   });
@@ -104,10 +118,10 @@ describe('webhook de pedido', () => {
   });
 
   it('pedido pending fixa o criador mas ainda não vira venda', async () => {
-    const { body } = await post(ctx.app, '/webhooks/orders', orderPayload({ status: 'pending' }));
+    const { view } = await post(ctx.app, '/webhooks/orders', orderPayload({ status: 'pending' }));
 
-    expect(body.order).toMatchObject({ status: 'pending', creator_id: 'ana' });
-    expect(body.ledger).toHaveLength(0);
+    expect(view.order).toMatchObject({ status: 'pending', creator_id: 'ana' });
+    expect(view.ledger).toHaveLength(0);
     expect(await netOf(ctx.app, 'ana')).toBe(0);
   });
 
@@ -120,7 +134,7 @@ describe('webhook de pedido', () => {
     );
 
     expect(paid.body.outcome).toBe('updated');
-    expect(paid.body.order).toMatchObject({ status: 'paid', creator_id: 'ana' });
+    expect(paid.view.order).toMatchObject({ status: 'paid', creator_id: 'ana' });
     expect(await netOf(ctx.app, 'ana')).toBe(10000);
     expect(await netOf(ctx.app, 'bruno')).toBe(0);
   });
@@ -139,7 +153,7 @@ describe('webhook de pedido', () => {
     const again = await post(ctx.app, '/webhooks/orders', orderPayload({ status: 'pending' }));
 
     expect(again.body.outcome).toBe('duplicate');
-    expect(again.body.order.status).toBe('pending');
+    expect(again.view.order.status).toBe('pending');
   });
 
   it('pending que vira cancelled nunca vira venda', async () => {
@@ -153,7 +167,7 @@ describe('webhook de pedido', () => {
 
     expect(cancelled.body.outcome).toBe('updated');
     expect(paidLater.body.outcome).toBe('duplicate');
-    expect(paidLater.body.order.status).toBe('cancelled');
+    expect(paidLater.view.order.status).toBe('cancelled');
     expect(await netOf(ctx.app, 'ana')).toBe(0);
   });
 
@@ -167,7 +181,7 @@ describe('webhook de pedido', () => {
     );
 
     expect(cancelled.body.outcome).toBe('duplicate');
-    expect(cancelled.body.order.status).toBe('paid');
+    expect(cancelled.view.order.status).toBe('paid');
     expect(await netOf(ctx.app, 'ana')).toBe(10000);
   });
 
