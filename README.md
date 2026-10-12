@@ -84,6 +84,6 @@ Cada webhook roda em uma transação síncrona, então duas requisições não s
 
 O Claude Code (Claude Opus 5.5) escreveu o código, os testes e este README.
 
-Eu tomei as decisões de desenho antes do código: o desempate, o tratamento de cada caso da tabela acima, os centavos inteiros, Fastify com Zod, SQLite e a assinatura HMAC fora do escopo.
+Eu tomei as decisões de desenho antes do código: o desempate, o tratamento de cada caso da tabela acima, os centavos inteiros, Fastify com Zod e SQLite.
 
 Revisei as queries SQL e pedi o plano de execução de cada uma. Dessa revisão saíram um índice e a correção de maiúsculas no cupom. Não revisei o resto do código linha a linha.
