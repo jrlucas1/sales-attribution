@@ -5,6 +5,21 @@ import type { Db } from './db.ts';
 import { MONEY_PATTERN, toCents } from './money.ts';
 import { getCreatorSales, getOrderView, ingestOrder, ingestRefund } from './service.ts';
 
+// JSON.parse arredonda inteiro acima de 2^53. Aqui o inteiro positivo que não cabe
+// em number volta como o texto que veio no corpo, com todos os dígitos.
+function parseJsonKeepingBigIntegers(text: string): unknown {
+  return JSON.parse(text, keepBigInteger as (key: string, value: unknown) => unknown);
+}
+
+// O Node 22 passa ao reviver o texto original do valor; a lib do TypeScript ainda não tipa isso.
+function keepBigInteger(_key: string, value: unknown, context: { source?: string }): unknown {
+  const source = context.source;
+  if (typeof value === 'number' && !Number.isSafeInteger(value) && source && /^\d+$/.test(source)) {
+    return source;
+  }
+  return value;
+}
+
 // O Shopify manda ids numéricos; aqui eles viram texto para não perder precisão.
 const externalId = z
   .union([z.string().trim().min(1), z.number().int().positive()])
@@ -51,6 +66,14 @@ function readUtm(landingSite: string | null | undefined): {
 
 export function buildApp(db: Db): FastifyInstance {
   const app = Fastify();
+
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
+    try {
+      done(null, parseJsonKeepingBigIntegers(body as string));
+    } catch {
+      done(Object.assign(new Error('JSON inválido'), { statusCode: 400 }));
+    }
+  });
 
   app.post('/webhooks/orders', (request, reply) => {
     const parsed = orderPayload.safeParse(request.body);
