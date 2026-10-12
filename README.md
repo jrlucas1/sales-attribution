@@ -14,7 +14,7 @@ npm run typecheck
 npm run bench      # carga e estresse contra o servidor real
 ```
 
-`PORT` e `DATABASE_PATH` mudam a porta e o arquivo do banco. O banco começa com dois criadores: `ana` (cupom `ANA10`) e `bruno` (cupom `BRUNO10`).
+`PORT` e `DATABASE_PATH` mudam a porta e o arquivo do banco. O banco começa com dois criadores: `ana` (cupom `ANA10`) e `bruno` (cupom `BRUNO10`), e com a loja `loja-exemplo.myshopify.com` (segredo fictício `segredo-de-desenvolvimento`).
 
 ## Rotas
 
@@ -22,6 +22,7 @@ npm run bench      # carga e estresse contra o servidor real
 | --- | --- |
 | `POST /webhooks/orders` | Recebe um pedido |
 | `POST /webhooks/refunds` | Recebe um estorno |
+| `POST /creators` | Cadastra um criador com `id`, `coupon_code` e `utm_content` |
 | `GET /orders/:id` | Mostra o pedido, o criador, os lançamentos e os estornos |
 | `GET /creators/:id/sales` | Mostra venda, estornado e líquido do criador |
 
@@ -40,7 +41,7 @@ npm run bench      # carga e estresse contra o servidor real
 { "id": "r1", "order_id": 5001, "amount": "25.00", "currency": "BRL" }
 ```
 
-Os webhooks respondem 200 com `outcome`. Use `GET /orders/:id` para ler o estado do pedido. Um payload inválido recebe 422.
+Os webhooks respondem 200 com `outcome`. Use `GET /orders/:id` para ler o estado do pedido. Um payload inválido recebe 422. Cada webhook precisa dos headers `X-Shop-Domain` e `X-Hmac-Sha256` (HMAC-SHA256 do corpo com o segredo da loja, em base64); sem assinatura válida a resposta é 401 e nada é gravado.
 
 ## Regra de atribuição
 
@@ -74,8 +75,7 @@ Cada webhook roda em uma transação síncrona, então duas requisições não s
 
 ## O que ficou de fora
 
-- Assinatura HMAC do webhook.
-- Cadastro de criadores pela API.
+- Cadastro de lojas pela API e mais de um cupom por criador.
 - Mudança de valor ou de cupom em um pedido já recebido.
 - Mais de um processo no mesmo banco.
 - Prazo para um estorno `pending` cujo pedido nunca chega.

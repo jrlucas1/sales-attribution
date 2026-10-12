@@ -6,6 +6,10 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { SEED_SHOPS } from '../src/db.ts';
+import { signBody } from '../src/signature.ts';
+
+const SHOP = SEED_SHOPS[0]!;
 
 const LOAD_REQUESTS = Number(process.env.LOAD_REQUESTS ?? 20_000);
 const LOAD_CONCURRENCY = Number(process.env.LOAD_CONCURRENCY ?? 50);
@@ -36,10 +40,18 @@ let baseUrl = '';
 async function send(stats: Stats, method: 'GET' | 'POST', path: string, body?: unknown): Promise<void> {
   const start = performance.now();
   try {
+    const json = body ? JSON.stringify(body) : undefined;
     const response = await fetch(baseUrl + path, {
       method,
-      headers: body ? { 'content-type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
+      // Os webhooks vão assinados pela loja de desenvolvimento que o servidor cadastra ao subir.
+      headers: json
+        ? {
+            'content-type': 'application/json',
+            'x-shop-domain': SHOP.domain,
+            'x-hmac-sha256': signBody(SHOP.webhookSecret, json),
+          }
+        : undefined,
+      body: json,
     });
     await response.arrayBuffer();
     stats.statuses.set(response.status, (stats.statuses.get(response.status) ?? 0) + 1);

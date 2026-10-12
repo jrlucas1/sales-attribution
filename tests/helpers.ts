@@ -1,15 +1,28 @@
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.ts';
-import { insertCreators, openDatabase } from '../src/db.ts';
+import { insertCreators, insertShops, openDatabase } from '../src/db.ts';
 import type { Db } from '../src/db.ts';
+import { signBody } from '../src/signature.ts';
 
 export interface TestContext {
   app: FastifyInstance;
   db: Db;
 }
 
+export const TEST_SHOP = { domain: 'loja-de-teste.example', webhookSecret: 'segredo-de-teste' };
+
+// Headers de um webhook assinado pela loja de teste.
+export function signedHeaders(body: string): Record<string, string> {
+  return {
+    'content-type': 'application/json',
+    'x-shop-domain': TEST_SHOP.domain,
+    'x-hmac-sha256': signBody(TEST_SHOP.webhookSecret, body),
+  };
+}
+
 export function createContext(): TestContext {
   const db = openDatabase();
+  insertShops(db, [TEST_SHOP]);
   insertCreators(db, [
     { id: 'ana', couponCode: 'ANA10', utmContent: 'ana' },
     { id: 'bruno', couponCode: 'BRUNO10', utmContent: 'bruno' },
@@ -39,10 +52,11 @@ export function refundPayload(overrides: Record<string, unknown> = {}): Record<s
   };
 }
 
-// Envia um webhook. `view` é o pedido lido por GET /orders/:id logo depois,
+// Envia um webhook assinado. `view` é o pedido lido por GET /orders/:id logo depois,
 // ou null quando o payload não tem id de pedido ou nada foi gravado.
 export async function post(app: FastifyInstance, url: string, payload: Record<string, unknown>) {
-  const response = await app.inject({ method: 'POST', url, payload });
+  const body = JSON.stringify(payload);
+  const response = await app.inject({ method: 'POST', url, payload: body, headers: signedHeaders(body) });
   const orderId = payload.order_id ?? payload.id;
   const order = orderId === undefined ? null : await get(app, `/orders/${orderId}`);
   return {

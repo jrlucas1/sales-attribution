@@ -1,9 +1,32 @@
 import Fastify from 'fastify';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { findWebhookSecret } from './db.ts';
 import type { Db } from './db.ts';
+import { isValidSignature } from './signature.ts';
 import { MONEY_PATTERN, toCents } from './money.ts';
-import { getCreatorSales, getOrderView, ingestOrder, ingestRefund } from './service.ts';
+import {
+  createCreator,
+  getCreatorSales,
+  getOrderView,
+  ingestOrder,
+  ingestRefund,
+} from './service.ts';
+
+// JSON.parse arredonda inteiro acima de 2^53. Aqui o inteiro positivo que não cabe
+// em number volta como o texto que veio no corpo, com todos os dígitos.
+function parseJsonKeepingBigIntegers(text: string): unknown {
+  return JSON.parse(text, keepBigInteger as (key: string, value: unknown) => unknown);
+}
+
+// O Node 22 passa ao reviver o texto original do valor; a lib do TypeScript ainda não tipa isso.
+function keepBigInteger(_key: string, value: unknown, context: { source?: string }): unknown {
+  const source = context.source;
+  if (typeof value === 'number' && !Number.isSafeInteger(value) && source && /^\d+$/.test(source)) {
+    return source;
+  }
+  return value;
+}
 
 // O Shopify manda ids numéricos; aqui eles viram texto para não perder precisão.
 const externalId = z
@@ -33,6 +56,14 @@ const refundPayload = z.object({
   currency,
 });
 
+const creatorField = z.string().trim().min(1);
+
+const creatorPayload = z.object({
+  id: creatorField,
+  coupon_code: creatorField,
+  utm_content: creatorField,
+});
+
 // As UTMs vêm na query string de landing_site, como no pedido do Shopify.
 function readUtm(landingSite: string | null | undefined): {
   utmSource: string | null;
@@ -52,7 +83,38 @@ function readUtm(landingSite: string | null | undefined): {
 export function buildApp(db: Db): FastifyInstance {
   const app = Fastify();
 
-  app.post('/webhooks/orders', (request, reply) => {
+  // O corpo cru fica guardado: a assinatura do webhook é calculada sobre ele.
+  const rawBodies = new WeakMap<FastifyRequest, Buffer>();
+
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    const raw = body as Buffer;
+    rawBodies.set(request, raw);
+    try {
+      done(null, parseJsonKeepingBigIntegers(raw.toString('utf8')));
+    } catch {
+      done(Object.assign(new Error('JSON inválido'), { statusCode: 400 }));
+    }
+  });
+
+  // Roda antes do handler: sem loja conhecida e assinatura válida, o webhook
+  // recebe 401 e nada é lido do payload nem gravado.
+  const requireSignature = async (request: FastifyRequest, reply: FastifyReply) => {
+    const domain = request.headers['x-shop-domain'];
+    const signature = request.headers['x-hmac-sha256'];
+    const raw = rawBodies.get(request);
+    const secret = typeof domain === 'string' ? findWebhookSecret(db, domain) : undefined;
+
+    const valid =
+      secret !== undefined &&
+      raw !== undefined &&
+      typeof signature === 'string' &&
+      isValidSignature(secret, raw, signature);
+    if (!valid) {
+      return reply.code(401).send({ error: 'invalid_signature' });
+    }
+  };
+
+  app.post('/webhooks/orders', { preHandler: requireSignature }, (request, reply) => {
     const parsed = orderPayload.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(422).send({ error: 'invalid_payload', issues: parsed.error.issues });
@@ -69,7 +131,7 @@ export function buildApp(db: Db): FastifyInstance {
     return reply.send({ outcome });
   });
 
-  app.post('/webhooks/refunds', (request, reply) => {
+  app.post('/webhooks/refunds', { preHandler: requireSignature }, (request, reply) => {
     const parsed = refundPayload.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(422).send({ error: 'invalid_payload', issues: parsed.error.issues });
@@ -90,6 +152,24 @@ export function buildApp(db: Db): FastifyInstance {
       return reply.code(404).send({ error: 'not_found' });
     }
     return reply.send(view);
+  });
+
+  // Vale para os pedidos que chegarem depois: pedido já recebido não muda de criador.
+  app.post('/creators', (request, reply) => {
+    const parsed = creatorPayload.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(422).send({ error: 'invalid_payload', issues: parsed.error.issues });
+    }
+    const payload = parsed.data;
+    const outcome = createCreator(db, {
+      id: payload.id,
+      couponCode: payload.coupon_code,
+      utmContent: payload.utm_content,
+    });
+    if (outcome === 'conflict') {
+      return reply.code(409).send({ error: 'creator_conflict' });
+    }
+    return reply.code(201).send(payload);
   });
 
   app.get<{ Params: { id: string } }>('/creators/:id/sales', (request, reply) => {
