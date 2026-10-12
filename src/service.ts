@@ -63,6 +63,16 @@ function listCreators(db: Db): Creator[] {
   ).all() as Creator[];
 }
 
+// O banco recusa id, cupom ou UTM que já são de outro criador (cupom e UTM sem
+// diferenciar maiúsculas). Qualquer um desses conflitos deixa o cadastro sem efeito.
+export function createCreator(db: Db, creator: Creator): 'created' | 'conflict' {
+  const inserted = prepared(
+    db,
+    'INSERT INTO creators (id, coupon_code, utm_content) VALUES (?, ?, ?) ON CONFLICT DO NOTHING',
+  ).run(creator.id, creator.couponCode, creator.utmContent);
+  return inserted.changes === 1 ? 'created' : 'conflict';
+}
+
 function findOrder(db: Db, orderId: string): OrderRow | undefined {
   return prepared(db, 'SELECT * FROM orders WHERE id = ?').get(orderId) as OrderRow | undefined;
 }

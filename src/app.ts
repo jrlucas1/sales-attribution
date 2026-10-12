@@ -3,7 +3,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Db } from './db.ts';
 import { MONEY_PATTERN, toCents } from './money.ts';
-import { getCreatorSales, getOrderView, ingestOrder, ingestRefund } from './service.ts';
+import {
+  createCreator,
+  getCreatorSales,
+  getOrderView,
+  ingestOrder,
+  ingestRefund,
+} from './service.ts';
 
 // JSON.parse arredonda inteiro acima de 2^53. Aqui o inteiro positivo que não cabe
 // em number volta como o texto que veio no corpo, com todos os dígitos.
@@ -46,6 +52,14 @@ const refundPayload = z.object({
   order_id: externalId,
   amount: money.refine((cents) => cents > 0, 'o estorno precisa ser maior que zero'),
   currency,
+});
+
+const creatorField = z.string().trim().min(1);
+
+const creatorPayload = z.object({
+  id: creatorField,
+  coupon_code: creatorField,
+  utm_content: creatorField,
 });
 
 // As UTMs vêm na query string de landing_site, como no pedido do Shopify.
@@ -113,6 +127,24 @@ export function buildApp(db: Db): FastifyInstance {
       return reply.code(404).send({ error: 'not_found' });
     }
     return reply.send(view);
+  });
+
+  // Vale para os pedidos que chegarem depois: pedido já recebido não muda de criador.
+  app.post('/creators', (request, reply) => {
+    const parsed = creatorPayload.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(422).send({ error: 'invalid_payload', issues: parsed.error.issues });
+    }
+    const payload = parsed.data;
+    const outcome = createCreator(db, {
+      id: payload.id,
+      couponCode: payload.coupon_code,
+      utmContent: payload.utm_content,
+    });
+    if (outcome === 'conflict') {
+      return reply.code(409).send({ error: 'creator_conflict' });
+    }
+    return reply.code(201).send(payload);
   });
 
   app.get<{ Params: { id: string } }>('/creators/:id/sales', (request, reply) => {
