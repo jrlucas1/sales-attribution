@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS creators (
   utm_content TEXT NOT NULL UNIQUE COLLATE NOCASE
 );
 
+-- Cada loja assina os webhooks com o próprio segredo.
+CREATE TABLE IF NOT EXISTS shops (
+  domain         TEXT PRIMARY KEY COLLATE NOCASE,
+  webhook_secret TEXT NOT NULL CHECK (webhook_secret <> '')
+);
+
 CREATE TABLE IF NOT EXISTS orders (
   id                 TEXT PRIMARY KEY,
   total_cents        INTEGER NOT NULL CHECK (total_cents >= 0),
@@ -98,6 +104,30 @@ export function insertCreators(db: Db, creators: Creator[]): void {
     insert.run(creator.id, creator.couponCode, creator.utmContent);
   }
 }
+
+export interface Shop {
+  domain: string;
+  webhookSecret: string;
+}
+
+export function insertShops(db: Db, shops: Shop[]): void {
+  const insert = db.prepare('INSERT OR IGNORE INTO shops (domain, webhook_secret) VALUES (?, ?)');
+  for (const shop of shops) {
+    insert.run(shop.domain, shop.webhookSecret);
+  }
+}
+
+export function findWebhookSecret(db: Db, domain: string): string | undefined {
+  const row = prepared(db, 'SELECT webhook_secret AS secret FROM shops WHERE domain = ?').get(
+    domain,
+  ) as { secret: string } | undefined;
+  return row?.secret;
+}
+
+// Loja de desenvolvimento. O segredo é fictício e só serve para rodar local e no bench.
+export const SEED_SHOPS: Shop[] = [
+  { domain: 'loja-exemplo.myshopify.com', webhookSecret: 'segredo-de-desenvolvimento' },
+];
 
 export const SEED_CREATORS: Creator[] = [
   { id: 'ana', couponCode: 'ANA10', utmContent: 'ana' },

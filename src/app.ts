@@ -1,7 +1,9 @@
 import Fastify from 'fastify';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { findWebhookSecret } from './db.ts';
 import type { Db } from './db.ts';
+import { isValidSignature } from './signature.ts';
 import { MONEY_PATTERN, toCents } from './money.ts';
 import {
   createCreator,
@@ -81,15 +83,38 @@ function readUtm(landingSite: string | null | undefined): {
 export function buildApp(db: Db): FastifyInstance {
   const app = Fastify();
 
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
+  // O corpo cru fica guardado: a assinatura do webhook é calculada sobre ele.
+  const rawBodies = new WeakMap<FastifyRequest, Buffer>();
+
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    const raw = body as Buffer;
+    rawBodies.set(request, raw);
     try {
-      done(null, parseJsonKeepingBigIntegers(body as string));
+      done(null, parseJsonKeepingBigIntegers(raw.toString('utf8')));
     } catch {
       done(Object.assign(new Error('JSON inválido'), { statusCode: 400 }));
     }
   });
 
-  app.post('/webhooks/orders', (request, reply) => {
+  // Roda antes do handler: sem loja conhecida e assinatura válida, o webhook
+  // recebe 401 e nada é lido do payload nem gravado.
+  const requireSignature = async (request: FastifyRequest, reply: FastifyReply) => {
+    const domain = request.headers['x-shop-domain'];
+    const signature = request.headers['x-hmac-sha256'];
+    const raw = rawBodies.get(request);
+    const secret = typeof domain === 'string' ? findWebhookSecret(db, domain) : undefined;
+
+    const valid =
+      secret !== undefined &&
+      raw !== undefined &&
+      typeof signature === 'string' &&
+      isValidSignature(secret, raw, signature);
+    if (!valid) {
+      return reply.code(401).send({ error: 'invalid_signature' });
+    }
+  };
+
+  app.post('/webhooks/orders', { preHandler: requireSignature }, (request, reply) => {
     const parsed = orderPayload.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(422).send({ error: 'invalid_payload', issues: parsed.error.issues });
@@ -106,7 +131,7 @@ export function buildApp(db: Db): FastifyInstance {
     return reply.send({ outcome });
   });
 
-  app.post('/webhooks/refunds', (request, reply) => {
+  app.post('/webhooks/refunds', { preHandler: requireSignature }, (request, reply) => {
     const parsed = refundPayload.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(422).send({ error: 'invalid_payload', issues: parsed.error.issues });

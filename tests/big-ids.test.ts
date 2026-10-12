@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createContext, get, netOf } from './helpers.ts';
+import { createContext, get, netOf, signedHeaders } from './helpers.ts';
 import type { TestContext } from './helpers.ts';
 
 // 2^53 + 1 não cabe em number: JSON.parse devolve 9007199254740992.
@@ -18,7 +18,7 @@ async function postRaw(url: string, body: string) {
     method: 'POST',
     url,
     payload: body,
-    headers: { 'content-type': 'application/json' },
+    headers: signedHeaders(body),
   });
   return { status: response.statusCode, body: response.json() };
 }
